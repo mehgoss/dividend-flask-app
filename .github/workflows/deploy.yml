@@ -1,0 +1,77 @@
+name: Deploy to Self-Hosted Server
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh/
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Copy code to server
+        run: |
+          rsync -avz --delete -e "ssh -o StrictHostKeyChecking=no" ./ ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/home/${{ secrets.SSH_USER }}/dividend-flask-app
+
+      - name: Install system dependencies and setup app
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'EOF'
+            # Install system dependencies for Playwright
+            sudo apt-get update
+            sudo apt-get install -y \
+              libnss3 \
+              libatk1.0-0 \
+              libatk-bridge2.0-0 \
+              libxcomposite1 \
+              libxrandr2 \
+              libxdamage1 \
+              libxkbcommon0 \
+              libpangocairo-1.0-0 \
+              libpango-1.0-0 \
+              libcairo2 \
+              libasound2 \
+              libgbm1 \
+              libgtk-3-0
+
+            # Set up Python environment
+            cd /home/${{ secrets.SSH_USER }}/dividend-flask-app
+            python3 -m venv venv
+            source venv/bin/activate
+            pip install --upgrade pip
+            pip install -r requirements.txt
+
+            # Install Playwright browsers
+            playwright install --with-deps
+
+            # Set up systemd service for gunicorn
+            sudo bash -c 'cat > /etc/systemd/system/dividend-flask-app.service' << 'SERVICE'
+            [Unit]
+            Description=Dividend Flask App Gunicorn Service
+            After=network.target
+
+            [Service]
+            User=${{ secrets.SSH_USER }}
+            WorkingDirectory=/home/${{ secrets.SSH_USER }}/dividend-flask-app
+            Environment="PATH=/home/${{ secrets.SSH_USER }}/dividend-flask-app/venv/bin"
+            ExecStart=/home/${{ secrets.SSH_USER }}/dividend-flask-app/venv/bin/gunicorn --workers 2 --bind 0.0.0.0:8000 app:app
+            Restart=always
+
+            [Install]
+            WantedBy=multi-user.target
+            SERVICE
+
+            # Enable and restart the service
+            sudo systemctl enable dividend-flask-app.service
+            sudo systemctl restart dividend-flask-app.service
+          EOF
