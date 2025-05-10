@@ -1,0 +1,16 @@
+body {
+    padding-top: 56px; /* Adjust for fixed navbar */
+}
+header {
+    padding: 100px 0;
+}
+section {
+    min-height: 400px;
+}
+.table-responsive {
+    max-height: 500px;
+    overflow-y: auto;
+}
+canvas {
+    max-width: 100%;
+}
