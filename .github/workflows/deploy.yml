@@ -13,12 +13,37 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Debug SSH secrets
+        run: |
+          echo "SSH_HOST: ${{ secrets.SSH_HOST }}"
+          echo "SSH_USER: ${{ secrets.SSH_USER }}"
+          echo "SSH_PRIVATE_KEY set: $(if [ -n '${{ secrets.SSH_PRIVATE_KEY }}' ]; then echo 'yes'; else echo 'no'; fi)"
+
       - name: Set up SSH
         run: |
-          mkdir -p ~/.ssh/
+          mkdir -p ~/.ssh
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+          # Verify SSH_HOST is set
+          if [ -z "${{ secrets.SSH_HOST }}" ]; then
+            echo "Error: SSH_HOST is not set"
+            exit 1
+          fi
+          # Run ssh-keyscan with timeout and retry
+          for i in {1..3}; do
+            ssh-keyscan -t rsa -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts && break
+            echo "Retry $i: ssh-keyscan failed, waiting 5s..."
+            sleep 5
+          done
+          # Verify known_hosts
+          if ! grep -q "${{ secrets.SSH_HOST }}" ~/.ssh/known_hosts; then
+            echo "Error: Failed to add ${{ secrets.SSH_HOST }} to known_hosts"
+            exit 1
+          fi
+
+      - name: Test SSH connection
+        run: |
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "echo 'SSH connection successful'"
 
       - name: Copy code to server
         run: |
